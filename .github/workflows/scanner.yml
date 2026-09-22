@@ -2,9 +2,8 @@ name: IMAX Ticket Scanner
 
 on:
   schedule:
-    # Führt das Skript alle 15 Minuten aus
     - cron: '*/15 * * * *'
-  workflow_dispatch: # Erlaubt dir, den Scanner jederzeit manuell per Klick zu testen
+  workflow_dispatch:
 
 jobs:
   check-tickets:
@@ -15,8 +14,6 @@ jobs:
     steps:
       - name: Code auschecken
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Python einrichten
         uses: actions/setup-python@v5
@@ -37,10 +34,10 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
           touch seen.txt
           git add seen.txt
           if ! git diff --staged --quiet; then
             git commit -m "Update seen shows [skip ci]"
-            git pull --rebase origin main
             git push origin main
           fi
