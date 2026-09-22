@@ -7,10 +7,10 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 SEEN_FILE = "seen.txt"
 
-# Ziel-URLs für UCI Luxe East Side Gallery
+# Exakte URLs inklusive Kino-ID 82 (East Side Gallery)
 URLS = [
-    "https://www.uci-kinowelt.de/film/die-odyssee/407923/berlin-east-side-gallery",
-    "https://www.uci-kinowelt.de/kinoprogramm/berlin-east-side-gallery"
+    "https://www.uci-kinowelt.de/film/die-odyssee/407923/berlin-east-side-gallery/82",
+    "https://app.uci-kinowelt.de/kinoprogramm/berlin-east-side-gallery/82/list?version=imax"
 ]
 
 HEADERS = {
@@ -18,12 +18,12 @@ HEADERS = {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
+    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8"
 }
 
 def send_telegram(message: str):
     if not TOKEN or not CHAT_ID:
-        print("Telegram Secrets fehlen!")
+        print("❌ FEHLER: Telegram Secrets (TOKEN oder CHAT_ID) fehlen!")
         return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
@@ -33,7 +33,7 @@ def send_telegram(message: str):
         "disable_web_page_preview": False
     }
     res = requests.post(url, json=payload, timeout=15)
-    print(f"Telegram Status: {res.status_code}")
+    print(f"📡 Telegram API Antwort: HTTP {res.status_code} - {res.text}")
 
 def load_seen():
     if os.path.exists(SEEN_FILE):
@@ -47,61 +47,75 @@ def save_seen(seen):
             f.write(f"{item}\n")
 
 def check():
+    print("🔍 Starte Suche nach Odyssee IMAX Tickets...")
     seen = load_seen()
-    found_any = False
+    found_shows = []
+    direct_link = URLS[0]
 
     for target_url in URLS:
         try:
+            print(f"🌐 Rufe ab: {target_url}")
             resp = requests.get(target_url, headers=HEADERS, timeout=20)
+            print(f"ℹ️ Status Code: {resp.status_code}")
+
             if resp.status_code != 200:
                 continue
 
-            content = resp.text
-            soup = BeautifulSoup(content, "html.parser")
-            text_lower = soup.get_text().lower()
-
-            # Prüfen, ob Odyssee überhaupt auf der Seite vorkommt
-            if "odyssee" not in text_lower:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            page_text = soup.get_text(separator=" ")
+            
+            # Prüfen, ob der Film erwähnt wird
+            if "odyssee" not in page_text.lower():
+                print("ℹ️ 'Odyssee' auf dieser Seite nicht im Text gefunden.")
                 continue
 
-            # Wir suchen nach Abschnitten/Links mit OV / IMAX
-            # RegEx sucht nach Mustern wie Datum + Uhrzeit + OV (z.B. "24. Sep ... 14:00 OV")
-            has_imax = "imax" in text_lower
-            has_ov = "ov" in text_lower or "originalversion" in text_lower
+            # Suche nach Terminen mit Uhrzeit + OV oder OmU
+            # Erfasst Muster wie "24. Sep. 14:00 OV" oder "Heute 14:00 OmU"
+            matches = re.findall(
+                r'((?:Mo|Di|Mi|Do|Fr|Sa|So|\d{1,2}\.)[^\n\r]{0,35}\b\d{1,2}:\d{2}\b[^\n\r]{0,15}\b(?:OV|OmU)\b)',
+                page_text,
+                re.IGNORECASE
+            )
 
-            if has_imax and has_ov:
-                # Extrahiere Spielzeiten / Fundstellen
-                matches = re.findall(r'(\d{1,2}\.\s*[A-Za-z]{3}[^\n\r<]{0,80}(?:OV|IMAX)[^\n\r<]{0,80})', content, re.IGNORECASE)
-                
-                details = []
-                for m in matches:
-                    clean = " ".join(m.split())
-                    if "OV" in clean.upper():
-                        details.append(clean)
+            for m in matches:
+                cleaned = " ".join(m.split())
+                if cleaned not in found_shows:
+                    found_shows.append(cleaned)
 
-                event_id = f"odyssee_imax_ov_{len(details)}"
-                
-                if event_id not in seen:
-                    seen.add(event_id)
-                    found_any = True
-
-                    sample_times = "\n".join(f"• {d}" for d in details[:5]) if details else "Vorstellungen online gelistet!"
-                    msg = (
-                        "🚨 <b>IMAX OV TICKETS GEFUNDEN!</b> 🚨\n\n"
-                        "<b>Film:</b> Die Odyssee\n"
-                        "<b>Kino:</b> UCI Luxe Berlin - East Side Gallery\n"
-                        "<b>Format:</b> IMAX (OV)\n\n"
-                        f"<b>Termine:</b>\n{sample_times}\n\n"
-                        f"👉 <a href='{target_url}'>Hier direkt Tickets auswählen & buchen</a>"
-                    )
-                    send_telegram(msg)
-                    break
+            if found_shows:
+                direct_link = target_url
+                break
 
         except Exception as e:
-            print(f"Fehler bei {target_url}: {e}")
+            print(f"❌ Fehler bei Anfrage: {e}")
 
-    if found_any:
-        save_seen(seen)
+    print(f"📊 Gefundene Vorstellungen: {len(found_shows)}")
+    for s in found_shows:
+        print(f"   -> {s}")
+
+    if found_shows:
+        # Erstelle eine eindeutige Kennung aller Termine
+        signature = "_".join(sorted(found_shows))
+        
+        if signature not in seen:
+            print("🚀 Neue Vorstellungen entdeckt! Sende Telegram-Alert...")
+            termin_liste = "\n".join(f"• <b>{show}</b>" for show in found_shows[:8])
+            
+            msg = (
+                "🚨 <b>IMAX TICKETS GEFUNDEN!</b> 🚨\n\n"
+                "<b>Film:</b> Die Odyssee\n"
+                "<b>Kino:</b> UCI Luxe Berlin - East Side Gallery\n"
+                "<b>Format:</b> IMAX (OV / OmU)\n\n"
+                f"<b>Verfügbare Termine:</b>\n{termin_liste}\n\n"
+                f"👉 <a href='{direct_link}'>Jetzt Plätze auswählen & buchen</a>"
+            )
+            send_telegram(msg)
+            seen.add(signature)
+            save_seen(seen)
+        else:
+            print("ℹ️ Diese Vorstellungen wurden dir bereits gemeldet.")
+    else:
+        print("⚠️ Keine passenden OV/OmU-Termine im HTML gefunden.")
 
 if __name__ == "__main__":
     check()
