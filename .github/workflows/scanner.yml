@@ -22,7 +22,7 @@ jobs:
 
       - name: Pakete installieren
         run: |
-          pip install requests beautifulsoup4
+          pip install curl_cffi beautifulsoup4 requests
 
       - name: Scanner ausführen
         env:
