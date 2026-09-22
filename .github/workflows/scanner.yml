@@ -1,0 +1,40 @@
+name: IMAX Ticket Scanner
+
+on:
+  schedule:
+    # Führt das Skript alle 15 Minuten aus
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # Erlaubt dir, den Scanner jederzeit manuell per Klick zu testen
+
+jobs:
+  check-tickets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Erlaubt das Speichern von bereits gemeldeten Vorstellungen
+
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Pakete installieren
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Scanner ausführen
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py
+
+      - name: Bereits gesehene Shows speichern
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          touch seen.txt
+          git add seen.txt
+          git diff --staged --quiet || (git commit -m "Update seen shows" && git push)
